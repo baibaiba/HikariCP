@@ -807,6 +807,7 @@ public final class HikariPool extends PoolBase implements HikariPoolMXBean, IBag
             previous = now;
 
             var afterPrefix = "Pool ";
+            // 关键判断条件，如果idleTimeout>0，并且minimumIdle < maximumPoolSize，则进行空闲连接回收
             if (idleTimeout > 0L && config.getMinimumIdle() < config.getMaximumPoolSize()) {
                logPoolState("Before cleanup ");
                afterPrefix = "After cleanup  ";
