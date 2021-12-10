@@ -72,10 +72,10 @@ public class ConcurrentBag<T extends IConcurrentBagEntry> implements AutoCloseab
 
    public interface IConcurrentBagEntry
    {
-      int STATE_NOT_IN_USE = 0;
-      int STATE_IN_USE = 1;
-      int STATE_REMOVED = -1;
-      int STATE_RESERVED = -2;
+      int STATE_NOT_IN_USE = 0; // 未使用
+      int STATE_IN_USE = 1; // 使用中
+      int STATE_REMOVED = -1; // 待回收，该标记意味着该连接不可用，不能从连接池中进行获取
+      int STATE_RESERVED = -2; // 已回收
 
       boolean compareAndSet(int expectState, int newState);
       void setState(int newState);
@@ -293,6 +293,7 @@ public class ConcurrentBag<T extends IConcurrentBagEntry> implements AutoCloseab
     */
    public boolean reserve(final T bagEntry)
    {
+      // CAS操作，替换poolEntry的状态为RESERVED
       return bagEntry.compareAndSet(STATE_NOT_IN_USE, STATE_RESERVED);
    }
 

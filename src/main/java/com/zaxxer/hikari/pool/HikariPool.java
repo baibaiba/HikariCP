@@ -461,19 +461,23 @@ public final class HikariPool extends PoolBase implements HikariPoolMXBean, IBag
    // ***********************************************************************
 
    /**
+    * 创建新的 poolEntry。 如果配置了 maxLifetime（并且需要大于10000ms），则创建一个与 maxLifetime 时间相差 2.5% 的未来生命周期结束任务，以确保池中的连接不会大量消失
+    *
     * Creating new poolEntry.  If maxLifetime is configured, create a future End-of-life task with 2.5% variance from
     * the maxLifetime time to ensure there is no massive die-off of Connections in the pool.
     */
    private PoolEntry createPoolEntry()
    {
       try {
+         // 创建一个poolEntry对象，该对象是实际连接的包装
          final var poolEntry = newPoolEntry();
-
+         // 获取maxLifetime配置值
          final var maxLifetime = config.getMaxLifetime();
          if (maxLifetime > 0) {
-            // variance up to 2.5% of the maxlifetime
+            // variance up to 2.5% of the maxlifetime（回收时间为maxLifetime 前后浮动 2.5%）
             final var variance = maxLifetime > 10_000 ? ThreadLocalRandom.current().nextLong( maxLifetime / 40 ) : 0;
             final var lifetime = maxLifetime - variance;
+            // 在schedule线程池中提交一个单次执行任务，用于回收该连接，maxLifeTime后会标记该连接为待清除
             poolEntry.setFutureEol(houseKeepingExecutorService.schedule(new MaxLifetimeTask(poolEntry), lifetime, MILLISECONDS));
          }
 
@@ -611,12 +615,15 @@ public final class HikariPool extends PoolBase implements HikariPoolMXBean, IBag
     */
    private boolean softEvictConnection(final PoolEntry poolEntry, final String reason, final boolean owner)
    {
+      // 先将poolEntry标记为待清除，待清除的连接不会被hikari取到并使用
       poolEntry.markEvicted();
-      if (owner || connectionBag.reserve(poolEntry)) {
+      if (owner || connectionBag.reserve(poolEntry)) { // 先从connectionBag中回收该对象
+         // 再物理关闭连接
          closeConnection(poolEntry, reason);
          return true;
       }
 
+      // 如果连接正在使用中，那就不会进行回收
       return false;
    }
 
@@ -813,17 +820,22 @@ public final class HikariPool extends PoolBase implements HikariPoolMXBean, IBag
                afterPrefix = "After cleanup  ";
 
                final var notInUse = connectionBag.values(STATE_NOT_IN_USE);
+               // 判断最多需要移除几个连接
                var toRemove = notInUse.size() - config.getMinimumIdle();
                for (PoolEntry entry : notInUse) {
+                  // 连接的上次使用时间距今是否已经过去了idleTimeout
                   if (toRemove > 0 && elapsedMillis(entry.lastAccessed, now) > idleTimeout && connectionBag.reserve(entry)) {
+                     // 关闭连接操作
                      closeConnection(entry, "(connection has passed idleTimeout)");
                      toRemove--;
                   }
                }
             }
 
+            // 记录日志
             logPoolState(afterPrefix);
 
+            // 填充连接池，维持最小连接数
             fillPool(true); // Try to maintain minimum connections
          }
          catch (Exception e) {
@@ -851,7 +863,9 @@ public final class HikariPool extends PoolBase implements HikariPoolMXBean, IBag
 
       public void run()
       {
+         // 判断连接是否可以回收
          if (softEvictConnection(poolEntry, "(connection has passed maxLifetime)", false /* not owner */)) {
+            // 如果回收成功，需要判断需不需要创建新的连接来替代
             addBagItem(connectionBag.getWaitingThreadCount());
          }
       }
